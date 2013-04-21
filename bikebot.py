@@ -495,7 +495,7 @@ def strava(phenny, input):
         else:
             phenny.reply('something gone wrong tell krisfremen')
             return
-    phenny.reply(js2resp['ride']['athlete']['username'] + ' rode ' + "%.2f" % float(js2resp['ride']['distance']/1000)  + ' km ('+ "%.2f" % float((js2resp['ride']['distance']/1000)*0.621371)  +' mi) in ' + str(datetime.timedelta(seconds=js2resp['ride']['elapsedTime'])) + ' (' +str(datetime.timedelta(seconds=js2resp['ride']['movingTime'])) + ' moving) averaging ' + "%.2f" % float(js2resp['ride']['averageSpeed']*3.6) + ' kph (' + "%.2f" % float((js2resp['ride']['averageSpeed']*3.6)*0.621371) + ' mph) climbing ' +  "%.2f" % float((js2resp['ride']['elevationGain'])) + 'm on ' + time.strftime('%b %d, %Y',time.strptime(js2resp['ride']['startDate'],'%Y-%m-%dT%H:%M:%SZ')) + ' titled ' + js2resp['ride']['name'])
+    phenny.reply(js2resp['ride']['athlete']['username'] + ' rode ' + "%.2f" % float(js2resp['ride']['distance']/1000)  + ' km ('+ "%.2f" % float((js2resp['ride']['distance']/1000)*0.621371)  +' mi) in ' + str(datetime.timedelta(seconds=js2resp['ride']['elapsedTime'])) + ' (' +str(datetime.timedelta(seconds=js2resp['ride']['movingTime'])) + ' moving) averaging ' + "%.2f" % float(js2resp['ride']['averageSpeed']*3.6) + ' kph (' + "%.2f" % float((js2resp['ride']['averageSpeed']*3.6)*0.621371) + ' mph) climbing ' +  "%.2f" % float((js2resp['ride']['elevationGain'])) + 'm (' + "%.2f" % float((js2resp['ride']['elevationGain'])*3.2808399)  +   ' ft) on ' + time.strftime('%b %d, %Y',time.strptime(js2resp['ride']['startDate'],'%Y-%m-%dT%H:%M:%SZ')) + ' titled ' + js2resp['ride']['name'])
 strava.commands = ['strava']
 strava.example = '.strava [username/id]'
 
