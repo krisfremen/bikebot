@@ -3,6 +3,7 @@
 """
 """
 import re
+import requests
 import unicodedata
 import time
 import urllib
@@ -17,7 +18,11 @@ import datetime
 import random
 import string
 import bleach
+import riak
+from lxml import html
 from BeautifulSoup import BeautifulSoup
+
+bucket='bicycling'
 
 def spank(phenny, input):
   if input.group(2):
@@ -43,32 +48,32 @@ def bible(phenny, input):
 bible.commands = ['bible']
 bible.example = '.bible'
 
-def karma(phenny, input):
-  inp = input.group(0).encode('ascii', 'ignore')
-  if inp[0] == '.':
-    return
-  for i in inp.split(' '):
-      if (i.endswith('++') or i.endswith('++;') or i.endswith('--') or i.endswith('--;')):
-          karm=i.split('++')[0]
-          if '--' in karm:
-              karm=i.split('--')[0]
-          if karm == '':
-              break
-          print('karm is ' + karm)
-          fetch=sqlquery('karma', karm,'karma')
-          if not fetch:
-              k=1
-          else:
-              if '--' in i:
-                  k=int(fetch[1])-1
-              else:
-                  k=int(fetch[1])+1
-          sqlrepsert('karma', karm, k ,'karma text primary key, karm text')
-          phenny.say(karm + ' has ' + str(k) +' karma')
-  return 
-karma.rule = r'.*(\+\+|\-\-).*'
-karma.priority = 'high'
-karma.thread = False
+#def karma(phenny, input):
+#  inp = input.group(0).encode('ascii', 'ignore')
+#  if inp[0] == '.':
+#    return
+#  for i in inp.split(' '):
+#      if (i.endswith('++') or i.endswith('++;') or i.endswith('--') or i.endswith('--;')):
+#          karm=i.split('++')[0]
+#          if '--' in karm:
+#              karm=i.split('--')[0]
+#          if karm == '':
+#              break
+#          print('karm is ' + karm)
+#          fetch=sqlquery('karma', karm,'karma')
+#          if not fetch:
+#              k=1
+#          else:
+#              if '--' in i:
+#                  k=int(fetch[1])-1
+#              else:
+#                  k=int(fetch[1])+1
+#          sqlrepsert('karma', karm, k ,'karma text primary key, karm text')
+#          phenny.say(karm + ' has ' + str(k) +' karma')
+#  return 
+#karma.rule = r'.*(\+\+|\-\-).*'
+#karma.priority = 'high'
+#karma.thread = False
 
 def skynet(phenny, input):
   return phenny.say('Skynet is now online!')
@@ -87,27 +92,22 @@ data.example = '.data'
 
 def forecast(phenny, input):
     if input.group(2):
-        fetch=sqlquery('location', input.group(2))
-        if fetch:
-            arg=fetch[1].split(".")[0]
-            if arg.isdigit():
-                arg=fetch[1].split(";")[0] #fetched something so use location from said nick
-            else:
-                arg=fetch[1].split(".")[0] #fetched something so use location from said nick
-        else:
-            arg=input.group(2) # look up arguments given (place)
+        fetch=readdbattr(input.group(2).lower(),'location')
     else:
-        fetch=sqlquery('location', input.nick)
-        if fetch:
-            arg=fetch[1].split(".")[0] #fetched something so use location from said nick
-            if arg.isdigit():
-                arg=fetch[1].split(";")[0] #fetched something so use location from said nick
-            else:
-                arg=fetch[1].split(".")[0] #fetched something so use location from said nick
+        fetch=readdbattr(input.nick.lower(),'location')
+    if fetch:
+        arg=fetch.split(".")[0]
+        if arg.isdigit():
+            arg=fetch.split(";")[0] #fetched something so use location from said nick
         else:
-            arg=""
+            arg=fetch.split(".")[0] #fetched something so use location from said nick
+    else:
+        arg=input.group(2) # look up arguments given (place)
+    try:
         if not arg:
             return phenny.say("Location please?")
+    except:
+        pass
     fccoordsjs=json.loads(web.get("http://maps.googleapis.com/maps/api/geocode/json?sensor=false&address="+arg))
     pprint.pprint(fccoordsjs)
     coords=fccoordsjs['results'][0]['geometry']['location']
@@ -128,23 +128,25 @@ forecast.example = '.forecast'
 def weather(phenny, input):
   apikey=phenny.config.weatherundergroundapikey
   if input.group(2):
-    fetch=sqlquery('location', input.group(2))
+    fetch=readdbattr(input.group(2).lower(),'location')
+    print fetch
     if fetch:
-      arg=fetch[1].split(".")[0] #fetched something so use location from said nick
+      arg=fetch.split(".")[0] #fetched something so use location from said nick
       if arg.isdigit():
-        arg=fetch[1].split(";")[0] #fetched something so use location from said nick
+        arg=fetch.split(";")[0] #fetched something so use location from said nick
       else:
-        arg=fetch[1].split(".")[0] #fetched something so use location from said nick
+        arg=fetch.split(".")[0] #fetched something so use location from said nick
     else:
       arg=input.group(2) # look up arguments given (place)
   else:
-    fetch=sqlquery('location', input.nick) # no arguments look up nick
+    fetch=readdbattr(input.nick.lower(),'location')
+    print fetch
     if fetch:
-      arg=fetch[1].split(".")[0] #fetched something so use location from said nick
+      arg=fetch.split(".")[0] #fetched something so use location from said nick
       if arg.isdigit():
-        arg=fetch[1].split(";")[0] #fetched something so use location from said nick
+        arg=fetch.split(";")[0] #fetched something so use location from said nick
       else:
-        arg=fetch[1].split(".")[0] #fetched something so use location from said nick
+        arg=fetch.split(".")[0] #fetched something so use location from said nick
     else:
       arg=""
   if not arg:
@@ -155,7 +157,7 @@ def weather(phenny, input):
   if not wunderj.get('current_observation'):
     return phenny.reply("You might want to be more specific with your query!")
   else:
-    return phenny.reply(wunderj['current_observation']['observation_location']['city'] + ' is currently ' + wunderj['current_observation']['weather'] + ' Temp: ' + wunderj['current_observation']['temperature_string'] + ' Wind: ' + str(wunderj['current_observation']['wind_mph']) + 'MPH (' + str(wunderj['current_observation']['wind_kph']) + ' KPH / ' + str( "%.1f" % float(wunderj['current_observation']['wind_kph']*0.27777777)) + ' M/S)' + ' ' + wunderj['current_observation']['wind_dir'] + ' Humidity: ' + wunderj['current_observation']['relative_humidity']  )
+    return phenny.reply(wunderj['current_observation']['observation_location']['city'] + ' is currently ' + wunderj['current_observation']['weather'] + ' \x02Temp:\x02 ' + wunderj['current_observation']['temperature_string'] + ' \x02Wind:\x02 ' + str(wunderj['current_observation']['wind_mph']) + 'MPH (' + str(wunderj['current_observation']['wind_kph']) + ' KPH / ' + str( "%.1f" % float(wunderj['current_observation']['wind_kph']*0.27777777)) + ' M/S)' + ' ' + wunderj['current_observation']['wind_dir'] + ' \x02Humidity:\x02 ' + wunderj['current_observation']['relative_humidity'] + ' at ' + wunderj['current_observation']['local_time_rfc822'] )
 weather.commands = ['weather']
 weather.example = '.weather'
 
@@ -354,6 +356,35 @@ def fortune(phenny, input):
 fortune.commands = ['fortune']
 fortune.example = '.fortune'
 
+def readdb(key):
+    r=riak.RiakClient(port=8087, transport_class=riak.RiakPbcTransport)
+    b=r.bucket(bucket)
+ #   print 'readdb data'+ str(b.get(key).data)
+    return b.get(key).get_data()
+
+def readdbattr(key,attr):
+    r=readdb(key)
+    if r:
+      try:
+        return r[attr]
+      except:
+        return None
+    return None
+
+def updatedbattr(key, attr, data):                                                                                                                                                     
+    old=readdb(key)
+    if old:
+        old[attr]=data
+    else:
+        old={attr:data}
+    savedb(key,old)
+
+def savedb(key, data):                                                                                                                                                       
+    db=riak.RiakClient(port=8087, transport_class=riak.RiakPbcTransport)
+    user_bucket=db.bucket(bucket)
+    new_user=user_bucket.new(key, data)
+    new_user.store()
+
 def sqlquery(table, nick, key='person'):
   conn = sqlite3.connect('bicycling.db')
   cur = conn.cursor()
@@ -370,198 +401,281 @@ def sqlrepsert(table, key, value, dblayout):
   conn.commit()
 
 def photo(phenny, input): 
+  n=input.nick
+  r=" looks like "
+  l=""
   if not input.group(2):
-    fetch=sqlquery('photo', input.nick)
+    fetch=readdbattr(n.lower(),'photo')
     if fetch:
-      return phenny.reply(fetch[1])
+      l=fetch
     else:
-      return phenny.say('Either give me a .photo set with a photo or go find a camera that won\'t break while taking a picture of you and get back to me')
-  else:
-    t = input.group(2).split(' ')
-    if len(t) >= 1:
-      if t[0] == 'set':
-        if len(t) < 2:
-          return phenny.say('Set what?')
-        else:
-          sqlrepsert('photo',input.nick, input.group(2)[4:],'person text primary key, photo text')
-          return phenny.say('Saving your photo.. Don\'t we look handsome today?' )
-      else:
-          fetch=sqlquery('photo', t[0])
-          if fetch:
-            return phenny.say(fetch[0] + ' looks like ' + fetch[1])
-          else:
-            return phenny.reply('Someone is unphotogenic.. If you don\'t have a photo set yet, use .photo set <photo>')
-photo.commands = ['photo']
-photo.example = '.photo set/person [photo]'
-
-def location(phenny, input): 
-  if not input.group(2):
-    fetch=sqlquery('location', input.nick)
-    if fetch:
-      return phenny.reply(fetch[1])
-    else:
-      return phenny.say('Either give me a .location set with a location or go find out where you live and get back to me')
+      r=": Give me a photo with .photo set [photohere]"
   else:
     t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
     if len(t) >= 1:
       if t[0] == 'set':
         if len(t) < 2:
-          return phenny.say('Set what?')
+          r='Where da ya live, duncey?'
         else:
-          sqlrepsert('location',input.nick, input.group(2)[4:],'person text primary key, location text')
+          updatedbattr(n.lower(), 'photo',input.group(2)[4:])
+          return phenny.say('Saving your photo!')
+      else:
+        n=t[0].lower()
+        fetch=readdbattr(n,'photo')
+        if fetch:
+          l=fetch
+        else:
+          r=": Give me a photo with .photo set [photohere]"
+  return phenny.say(n + r + l)
+photo.commands = ['photo']
+photo.example = '.photo set/person [photo]'
+
+def nearby(phenny,input):
+  location=readdbattr(input.nick, 'gpslocation')
+  if location:
+    location.replace(" ","%20")
+  else:
+    return phenny.say("You haven't set your location, please use .gpslocation set LAT,LONG")
+  if gpslocation:
+    presp=urllib2.urlopen("https://maps.googleapis.com/maps/api/place/nearbysearch/json?location="+location+"&name=%22" +input.group(2).replace(" ","%20")+ "%22&sensor=false&rankby=distance&key=CHANGETHISTHING").read()
+    prespjs=json.loads(presp)
+    print(presp)
+    if prespjs['status'] == 'ZERO_RESULTS':
+      return phenny.say("None found")
+    else:
+      return phenny.say(prespjs['results'][0]['name'] + ' ' + prespjs['results'][0]['vicinity'])
+nearby.commands = ['nearby']
+
+def gpslocation(phenny, input): 
+  n=input.nick
+  r=" is currently at "
+  l=""
+  if not input.group(2):
+    fetch=readdbattr(n.lower(),'gpslocation')
+    if fetch:
+      l=fetch
+    else:
+      r=": Give me a location with .gpslocation set [locationhere]"
+  else:
+    t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
+    if len(t) >= 1:
+      if t[0] == 'set':
+        if len(t) < 2:
+          r='Where are ya, duncey?'
+        else:
+          updatedbattr(n.lower(), 'gpslocation',input.group(2)[4:])
           return phenny.say('Saving your weird location... Is your place bike friendly?' )
       else:
-          fetch=sqlquery('location', t[0])
-          if fetch:
-            return phenny.say(fetch[0] + ' lives in ' + fetch[1])
-          else:
-            return phenny.reply('Dude, you must live on Mars!?! If you don\'t have a location set yet, use .location set <location>')
+        n=t[0]
+        fetch=readdbattr(n.lower(),'gpslocation')
+        if fetch:
+          l=fetch
+        else:
+          r=": Give me a location with .location set [locationhere]"
+  return phenny.say(n + r + l)
+gpslocation.commands = ['gpslocation']
+gpslocation.example = '.gpslocation set/person [location]'
+
+
+
+
+def location(phenny, input): 
+  n=input.nick
+  r=" lives in "
+  l=""
+  if not input.group(2):
+    fetch=readdbattr(n.lower(),'location')
+    if fetch:
+      l=fetch
+    else:
+      r=": Give me a location with .location set [locationhere]"
+  else:
+    t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
+    if len(t) >= 1:
+      if t[0] == 'set':
+        if len(t) < 2:
+          r='Where da ya live, duncey?'
+        else:
+          updatedbattr(n.lower(), 'location',input.group(2)[4:])
+          return phenny.say('Saving your weird location... Is your place bike friendly?' )
+      else:
+        n=t[0]
+        fetch=readdbattr(n.lower(),'location')
+        if fetch:
+          l=fetch
+        else:
+          r=": Give me a location with .location set [locationhere]"
+  return phenny.say(n + r + l)
 location.commands = ['location']
 location.example = '.location set/person [location]'
 
 def about(phenny, input): 
-  conn = sqlite3.connect('bicycling.db')
-  cur = conn.cursor()
+  n=input.nick
+  r="Interesting fact about "
+  l=""
   if not input.group(2):
-    cur.execute('SELECT * FROM about WHERE person=? LIMIT 1', (input.nick,))
-    fetch=cur.fetchone()
+    fetch=readdbattr(n.lower(),'about')
     if fetch:
-      return phenny.say('Interesting fact about ' + input.nick + ': ' + fetch[1])
+      l=n+': '+fetch
+      n=""
     else:
-      return phenny.say('Either tell me your life story or write a tolstoy novel and publish it!')
+      r=": Give me a story with .about set [abouthere]"
   else:
-    cur.execute("CREATE TABLE IF NOT EXISTS about (person text primary key, link text)")
     t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
     if len(t) >= 1:
       if t[0] == 'set':
-        sql="insert or replace into about values(?, ?)"
         if len(t) < 2:
-          return phenny.say('Set what?')
+          r='What\'s yer story, mate?'
         else:
-          cur.execute(sql, (input.nick, input.group(2)[4:]))
-          conn.commit()
-          return phenny.say('Saving your life story!')
+          updatedbattr(n.lower(), 'about',input.group(2)[4:])
+          return phenny.say('Saving your factoid!' )
       else:
-          cur.execute('SELECT * FROM about WHERE person=? LIMIT 1', (t[0],))
-          fetch=cur.fetchone()
-          if fetch:
-            return phenny.say('Interesting fact about ' + t[0] + ': ' + fetch[1])
-          else:
-            return phenny.say('ERROR: ' + t[0] + ' is a terrible redditor and has not set their life story.  SOLUTION: ' + t[0] + ' needs to message me .about set [biography here]')
+        n=t[0]
+        fetch=readdbattr(n.lower(),'about')
+        if fetch:
+          l=n+': '+fetch
+          n=""
+        else:
+          r=": Give me a story with .about set [abouthere]"
+  return phenny.say( n+ r+l)
 about.commands = ['about']
-about.example = '.about set/person [biography here]'
+about.example = '.about set/person [about]'
+
+def strava2(phenny, input):
+#    cookies=dict(_strava3_session="BAh7C0kiD3Nlc3Npb25faWQGOgZFRkkiJWI5OTNiMjFhMGQ3ZmE4ZWQ1ODEwZTczOWNiMWZmZjk3BjsAVEkiEGNsZWFyX2NsaWNrBjsARlRJIhBfY3NyZl90b2tlbgY7AEZJIjFBVWk5U0lrQ2laeWhvVWZ1T00vNWlJby9tb3JWY1g0azlxdzBDbnM4UERRPQY7AEZJIhRjYW1wYWlnbl9yZXN1bHQGOwBGSSI6MU1UMWhkR2hzWlhSbE96STljM1J5WVhaaFgyUnBjbVZqZEc5eWVUczBQVEk0TXpNME9RPT0GOwBGSSIHaWQGOwBGaQNFzQhJIhxyZWRpcmVjdF90b19hZnRlcl9sb2dpbgY7AEYiFS9hdGhsZXRlcy93aWxtZXI%3D--e5ec2c91ae2d4a13df88aae80add9d007be4e5c6")
+#    cookies=dict(strava_remember_id="576837", strava_remember_code="1e24da821de4819b64", _strava3_session="BAh7CUkiD3Nlc3Npb25faWQGOgZFRkkiJTUxYTRkMDYyZDI1MzMxNzJiOGI2NTViODM5MTQ3YjJkBjsAVEkiEGNsZWFyX2NsaWNrBjsARlRJIhBfY3NyZl90b2tlbgY7AEZJIjFBbitxd0kzOHh1bEpjVHFKQjFDQmt1RTVKT0ZQRmp1L1FFQkgxNVdRaWdVPQY7AEZJIgdpZAY7AEZpA0XNCA%3D%3D--7fe09a964729a069a5bdc4d706ea57ec17436646")
+    r=requests.get('http://krisfremen.com/tools/stravaproxy/athletes/krisfremen')
+    tex=html.document_fromstring(r.text)
+    print(r.url)
+    urls=tex.xpath('//a/@href')
+    for i in urls:
+        if 'activities' in i:
+            r=requests.get('http://krisfremen.com/tools/stravaproxy/'+i)
+#            print(r.text)
+            print(i)
+            return
+strava2.commands = ['strava2']
+strava2.example = '.strava2 [username/id]'
+
+
 
 def strava(phenny, input):
-    if input.group(2):
-        t = input.group(2).split(' ')
-        if t[0] == 'set' and len(t)>1:
-            sqlrepsert('strava', input.nick, t[1] ,'person text primary key, strava text')
-            return phenny.reply('Strava set up nicely, try it?')
-        else:
-            fetch=sqlquery('strava', t[0])
-            if fetch:
-                q=fetch[1]
-            else:
-                q=input.group(2)
+  return phenny.reply("Strava is no worky because of API updates. Until Strava releases their API to the public. No can do.")
+  n=input.nick
+  r=" lives in "
+  l=""
+  if not input.group(2):
+    fetch=readdbattr(n.lower(),'strava')
+    if fetch:
+      l=fetch
     else:
-        fetch=sqlquery('strava', input.nick)
+      return
+  else:
+    t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
+    if len(t) >= 1:
+      if t[0] == 'set':
+        if len(t) < 2:
+          return 
+        else:
+          updatedbattr(n.lower(), 'strava',input.group(2)[4:])
+          return phenny.say('Strava set up!')
+      else:
+        n=t[0]
+        fetch=readdbattr(n.lower(),'strava')
         if fetch:
-            q=fetch[1]
+          l=fetch
         else:
-            return
-    print('q'+q)
-    saresp=urllib2.urlopen('http://www.strava.com/api/v1/rides/' + q).read()
-    print 'saresp'
-    pprint.pprint(saresp)
-    erract=False
-    if 'error' in saresp:
-        erract=True
-    else:
-        js2resp=json.loads(saresp)
-    pprint.pprint(erract)
-    sresp=web.get('http://www.strava.com/api/v1/rides?athleteName=' + q);
-    print 'sresp'
-    pprint.pprint(sresp)
-    if erract==True:
-        if 'rides' in sresp:
-            jsresp=json.loads(sresp)
-            jsrespid=jsresp['rides'][0]
-            print 'jsrepsid'
-            pprint.pprint(jsrespid)
-            s2resp=web.get('http://www.strava.com/api/v1/rides/' + str(jsresp['rides'][0]['id']))
-            js2resp=json.loads(s2resp)
-            print 'js2resp'
-            pprint.pprint(js2resp)
-        else:
-            phenny.reply('something gone wrong tell krisfremen')
-            return
-    phenny.reply(js2resp['ride']['athlete']['username'] + ' rode ' + "%.2f" % float(js2resp['ride']['distance']/1000)  + ' km ('+ "%.2f" % float((js2resp['ride']['distance']/1000)*0.621371)  +' mi) in ' + str(datetime.timedelta(seconds=js2resp['ride']['elapsedTime'])) + ' (' +str(datetime.timedelta(seconds=js2resp['ride']['movingTime'])) + ' moving) averaging ' + "%.2f" % float(js2resp['ride']['averageSpeed']*3.6) + ' kph (' + "%.2f" % float((js2resp['ride']['averageSpeed']*3.6)*0.621371) + ' mph) climbing ' +  "%.2f" % float((js2resp['ride']['elevationGain'])) + 'm (' + "%.2f" % float((js2resp['ride']['elevationGain'])*3.2808399)  +   ' ft) on ' + time.strftime('%b %d, %Y',time.strptime(js2resp['ride']['startDate'],'%Y-%m-%dT%H:%M:%SZ')) + ' titled ' + js2resp['ride']['name'])
+          return
+  saresp=urllib2.urlopen('http://www.strava.com/api/v1/rides/' + l).read()
+  pprint.pprint(saresp)
+  erract=False
+  if 'error' in saresp:
+      erract=True
+  else:
+      js2resp=json.loads(saresp)
+  pprint.pprint(erract)
+  sresp=web.get('http://www.strava.com/api/v1/rides?athleteName=' + l);
+  pprint.pprint(sresp)
+  if erract==True:
+      if 'rides' in sresp:
+          jsresp=json.loads(sresp)
+          jsrespid=jsresp['rides'][0]
+          pprint.pprint(jsrespid)
+          s2resp=web.get('http://www.strava.com/api/v1/rides/' + str(jsresp['rides'][0]['id']))
+          js2resp=json.loads(s2resp)
+          pprint.pprint(js2resp)
+      else:
+          phenny.reply('something gone wrong tell krisfremen')
+          return
+  phenny.reply(js2resp['ride']['athlete']['username'] + ' rode ' + "%.2f" % float(js2resp['ride']['distance']/1000)  + ' km ('+ "%.2f" % float((js2resp['ride']['distance']/1000)*0.621371)  +' mi) in ' + str(datetime.timedelta(seconds=js2resp['ride']['elapsedTime'])) + ' (' +str(datetime.timedelta(seconds=js2resp['ride']['movingTime'])) + ' moving) averaging ' + "%.2f" % float(js2resp['ride']['averageSpeed']*3.6) + ' kph (' + "%.2f" % float((js2resp['ride']['averageSpeed']*3.6)*0.621371) + ' mph) climbing ' +  "%.2f" % float((js2resp['ride']['elevationGain'])) + 'm (' + "%.2f" % float((js2resp['ride']['elevationGain'])*3.2808399)  +   ' ft) on ' + time.strftime('%b %d, %Y',time.strptime(js2resp['ride']['startDate'],'%Y-%m-%dT%H:%M:%SZ')) + ' titled ' + js2resp['ride']['name'])
 strava.commands = ['strava']
 strava.example = '.strava [username/id]'
 
-def bikephoto(phenny, input): 
-  conn = sqlite3.connect('bicycling.db')
-  cur = conn.cursor()
+def bike(phenny, input): 
+  n=input.nick
+  r=" has "
+  l=""
   if not input.group(2):
-    cur.execute('SELECT * FROM bikephoto WHERE person=? LIMIT 1', (input.nick,))
-    fetch=cur.fetchone()
+    fetch=readdbattr(n.lower(),'bike')
     if fetch:
-      return phenny.say('Here is ' + input.nick + '\'s pride and joy : ' + fetch[1])
+      l=fetch
     else:
-      return phenny.say('Either give me a set with a picture or a person or bust a move and take a picture of your bicycle')
+      r=": Give me a bike with .bike set [bikehere]"
   else:
-    cur.execute("CREATE TABLE IF NOT EXISTS bikephoto (person text primary key, link text)")
     t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
     if len(t) >= 1:
       if t[0] == 'set':
-        sql="insert or replace into bikephoto values(?, ?)"
         if len(t) < 2:
-          return phenny.say('Set what?')
+          r='Where da ya live, duncey?'
         else:
-          cur.execute(sql, (input.nick, input.group(2)[4:]))
-          conn.commit()
-          return phenny.say('Saving your precious bike!')
+          updatedbattr(n.lower(), 'bike',input.group(2)[4:])
+          return phenny.say('Saving your weird bike... Is your place bike friendly?' )
       else:
-          cur.execute('SELECT * FROM bikephoto WHERE person=? LIMIT 1', (t[0],))
-          fetch=cur.fetchone()
-          if fetch:
-            return phenny.say('Here is ' + t[0] + '\'s pride and joy : ' + fetch[1])
-          else:
-            return phenny.say('ERROR: ' + t[0] + ' is a terrible redditor and has not set their bike photo.  SOLUTION: ' + t[0] + ' needs to message me .bikephoto set http://link.to/bike.jpg')
-bikephoto.commands = ['bikephoto', 'prideandjoy']
-bikephoto.example = '.bikephoto set/person [photo]'
+        n=t[0]
+        fetch=readdbattr(n.lower(),'bike')
+        if fetch:
+          l=fetch
+        else:
+          r=": Give me a bike with .bike set [bikehere]"
+  return phenny.say(n + r + l)
+bike.commands = ['bike']
+bike.example = '.bike set/person [bike]'
 
-def bike(phenny, input): 
-  conn = sqlite3.connect('bicycling.db')
-  cur = conn.cursor()
+def bikephoto(phenny, input): 
+  n=input.nick
+  r="'s bikes look like "
+  l=""
   if not input.group(2):
-    cur.execute('SELECT * FROM bike WHERE LOWER(person)=LOWER(?) LIMIT 1', (input.nick,))
-    fetch=cur.fetchone()
+    fetch=readdbattr(n.lower(),'bikephoto')
     if fetch:
-      return phenny.say(fetch[0] + ' has ' + fetch[1])
+      l=fetch
     else:
-      return phenny.say('Either give me a set with some text or a person or bust a move and write up a nice description of it')
+      r=": Give me a bikephoto with .bikephoto set [bikephotohere]"
   else:
-    cur.execute("CREATE TABLE IF NOT EXISTS bike (person text primary key, link text)")
-    t = input.group(2).split(' ')
+    t = unicodedata.normalize('NFKD', input.group(2)).encode('ascii', 'ignore').split(' ')
     if len(t) >= 1:
       if t[0] == 'set':
-        sql="insert or replace into bike values(?, ?)"
         if len(t) < 2:
-          return phenny.say('What kinda bike you have, hmm?')
+          r='Where da ya live, duncey?'
         else:
-          cur.execute(sql, (input.nick, input.group(2)[4:]))
-          conn.commit()
-          return phenny.say('Saving your precious bike!')
+          updatedbattr(n.lower(), 'bikephoto',input.group(2)[4:])
+          return phenny.say('Saving your weird bikephoto... Is your place bikephoto friendly?' )
       else:
-          cur.execute('SELECT * FROM bike WHERE LOWER(person)=LOWER(?) LIMIT 1 COLLATE NOCASE', (t[0],))
-          fetch=cur.fetchone()
-          if fetch:
-            return phenny.say(fetch[0] + ' has ' + fetch[1])
-          else:
-            return phenny.reply('Dude, where\'s my bike?!')
-bike.commands = ['bike']
-bike.example = '.bike set/person [text]'
+        n=t[0]
+        fetch=readdbattr(n.lower(),'bikephoto')
+        if fetch:
+          l=fetch
+        else:
+          r=": Give me a bikephoto with .bikephoto set [bikephotohere]"
+  return phenny.say(n + r + l)
+bikephoto.commands = ['bikephoto']
+bikephoto.example = '.bikephoto set/person [bikephoto]'
+
+
+
+
+
+
 
 def chainlove(phenny, input): 
   orig = web.get('http://www.chainlove.com')
@@ -609,6 +723,22 @@ class Grab(web.urllib.URLopener):
    def http_error_default(self, url, fp, errcode, errmsg, headers):
       return web.urllib.addinfourl(fp, [headers, errcode], "http:" + url)
 
+def pt(phenny, input): 
+   query = 'site:parktool.com ' +input.group(2)
+   if not query: 
+      return phenny.reply('.pt what?')
+   query = query.encode('utf-8')
+   uri = google_search(query)
+   if uri: 
+      phenny.reply(uri)
+      if not hasattr(phenny.bot, 'last_seen_uri'):
+         phenny.bot.last_seen_uri = {}
+      phenny.bot.last_seen_uri[input.sender] = uri
+   elif uri is False: phenny.reply("Problem getting data from Google.")
+   else: phenny.reply("No results found for that, sorry." % query)
+pt.commands = ['pt']
+pt.example = '.pt'
+
 def sb(phenny, input): 
    query = 'site:sheldonbrown.com ' +input.group(2)
    if not query: 
@@ -621,7 +751,7 @@ def sb(phenny, input):
          phenny.bot.last_seen_uri = {}
       phenny.bot.last_seen_uri[input.sender] = uri
    elif uri is False: phenny.reply("Problem getting data from Google.")
-   else: phenny.reply("No results found for that, sorry." % query)
+   else: phenny.reply("No results found for that, sorry.")
 sb.commands = ['sb']
 sb.example = '.sb'
 
@@ -679,6 +809,48 @@ def quote(phenny, input):
     conn.commit()
 quote.commands = ['quote']
 quote.example = '.quote set/person [quote]'
+
+def wiggie(q):
+    return str(int(re.search("\d+",q).group(0))*5) + ' '+re.search("\w+$",q).group(0)+'s'
+
+def c(phenny, input): 
+    """Google calculator."""
+    if not input.group(2):
+        return phenny.reply("Nothing to calculate.")
+    q = input.group(2).encode('utf-8')
+    q = q.replace('\xcf\x95', 'phi') # utf-8 U+03D5
+    q = q.replace('\xcf\x80', 'pi') # utf-8 U+03C0
+    if "wiggie" in q:
+        return phenny.say(wiggie(q))
+    uri = 'http://www.google.com/ig/calculator?q='
+
+    addon=""
+    if not "to" in q and re.search("m$",q,re.IGNORECASE):
+        addon =' to feet'
+    if not "to" in q and re.search("km$",q,re.IGNORECASE):
+        addon =' to miles'
+    if not "to" in q and re.search("c$",q,re.IGNORECASE):
+        addon =' to fahrenheit'
+    if not "to" in q and re.search("f$",q,re.IGNORECASE):
+        addon =' to celsius'
+    print uri
+    bytes = web.get(uri + web.urllib.quote(q+addon))
+    parts = bytes.split('",')
+    answer = [p for p in parts if p.startswith('rhs: "')][0][6:]
+    if answer: 
+        answer = answer.decode('unicode-escape')
+        answer = ''.join(chr(ord(c)) for c in answer)
+        answer = answer.decode('utf-8')
+        answer = answer.replace(u'\xc2\xa0', ',')
+        answer = answer.replace('<sup>', '^(')
+        answer = answer.replace('<sub>', '_(')
+        answer = answer.replace('</sub>', ')_')
+        answer = answer.replace('</sup>', ')')
+        answer = web.decode(answer)
+        phenny.say(answer)
+    else: phenny.say('Sorry, no result.')
+c.commands = ['c']
+c.example = '.c 5 + 3'
 
 if __name__ == '__main__': 
   print __doc__.strip()
